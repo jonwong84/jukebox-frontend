@@ -1,0 +1,28 @@
+<div class="artists-container">
+  <h2>Artists</h2>
+
+  <div class="search-box">
+    <input
+      type="text"
+      placeholder="Search artists by name..."
+      [ngModel]="search()"
+      (ngModelChange)="onSearchChange($event)"
+      aria-label="Search artists"
+    />
+  </div>
+
+  @if (loading()) {
+    <p class="loading-state">Loading artists...</p>
+  } @else if (artists().length === 0) {
+    <p class="empty-state">No artists found.</p>
+  } @else {
+    <ul class="artists-list">
+      @for (artist of artists(); track artist.id) {
+        <li class="artist-item">
+          {{ artist.name }}
+        </li>
+      }
+    </ul>
+  }
+</div>
+
