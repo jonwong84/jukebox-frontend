@@ -58,7 +58,8 @@
               "buildTarget": "jukebox-frontend:build:production"
             },
             "development": {
-              "buildTarget": "jukebox-frontend:build:development"
+              "buildTarget": "jukebox-frontend:build:development",
+              "proxyConfig": "proxy.conf.json"
             }
           },
           "defaultConfiguration": "development"
