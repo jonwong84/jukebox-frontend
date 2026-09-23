@@ -13,7 +13,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "test", "--", "--inspect-brk", "--no-coverage"],
+      "runtimeArgs": ["run", "test", "--", "--debug", "--no-coverage"],
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen"
     }
