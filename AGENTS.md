@@ -119,6 +119,16 @@ src/
   });
   ```
 
+### 4. Async / Concurrent Request Handling
+
+These conventions apply across all Jukebox repos, not just the frontend — they're general failure modes for anything that fetches data, runs jobs, or handles concurrent triggers.
+
+* **Cancel or ignore superseded work.** When a new request/trigger supersedes an earlier one still in flight (a new search, a re-triggered reconciliation run, a repeated call), the earlier one's result must not be allowed to overwrite the later one's state. Use whatever cancellation mechanism fits the stack — e.g. RxJS `switchMap` in Angular, `CancellationToken`/`CancellationTokenSource` in .NET — but the guarantee is the same: only the most recent operation's result should ever land in state.
+* **Consume pagination fully.** When consuming a paginated result set, don't just store the current page's items — retain total count and page state, and provide a way to reach data beyond the first page. Reset to the first page whenever the query/filter criteria changes.
+* **Distinguish error state from empty/stale state.** A failed operation must be recorded as a distinct error state, never allowed to fall through to "no results" or leave stale prior data looking current. Clear the error state at the start of each new attempt.
+
+Reference implementation: `jukebox-frontend`, `src/app/artists-list/artists-list.ts` — search + pagination + error handling via a `fetchTrigger$` → `switchMap` → inner `catchError` pipeline.
+
 ---
 
 ## Backend API Integration Reference
