@@ -1,0 +1,56 @@
+<div class="artists-container">
+  <h2>Artists</h2>
+
+  <div class="search-box">
+    <input
+      type="text"
+      placeholder="Search artists by name..."
+      [ngModel]="search()"
+      (ngModelChange)="onSearchChange($event)"
+      aria-label="Search artists"
+    />
+  </div>
+
+  @if (loading()) {
+    <p class="loading-state">Loading artists...</p>
+  } @else if (error()) {
+    <div class="error-state">
+      <p>{{ error() }}</p>
+      <button type="button" class="retry-button" (click)="retry()">Try again</button>
+    </div>
+  } @else if (artists().length === 0) {
+    <p class="empty-state">No artists found.</p>
+  } @else {
+    <ul class="artists-list">
+      @for (artist of artists(); track artist.id) {
+        <li class="artist-item">
+          {{ artist.name }}
+        </li>
+      }
+    </ul>
+
+    @if (totalPages() > 1) {
+      <div class="pagination-controls">
+        <button
+          type="button"
+          class="page-button"
+          [disabled]="currentPage() <= 1 || loading()"
+          (click)="prevPage()"
+        >
+          Previous
+        </button>
+        <span class="page-info">
+          Page {{ currentPage() }} of {{ totalPages() }} ({{ totalCount() }} artists)
+        </span>
+        <button
+          type="button"
+          class="page-button"
+          [disabled]="currentPage() >= totalPages() || loading()"
+          (click)="nextPage()"
+        >
+          Next
+        </button>
+      </div>
+    }
+  }
+</div>
