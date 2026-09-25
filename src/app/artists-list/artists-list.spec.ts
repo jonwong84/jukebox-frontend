@@ -170,6 +170,32 @@ describe('ArtistsList', () => {
   });
 
   describe('Issue 1: Debounce & SwitchMap Search Behavior', () => {
+    it('should cancel the active request and clear old results as soon as the search changes', () => {
+      vi.useFakeTimers();
+      const pending = new Subject<PagedResult<ArtistSummary>>();
+      mockArtistsService.getArtists
+        .mockReturnValueOnce(of(mockArtistsResult))
+        .mockReturnValueOnce(pending.asObservable());
+
+      fixture.detectChanges();
+      component.onSearchChange('First');
+      vi.advanceTimersByTime(300);
+      expect(pending.observed).toBe(true);
+
+      component.onSearchChange('Second');
+
+      expect(pending.observed).toBe(false);
+      expect(component.artists()).toEqual([]);
+      expect(component.totalCount()).toBe(0);
+      expect(component.loading()).toBe(true);
+      expect(mockArtistsService.getArtists).toHaveBeenCalledTimes(2);
+
+      pending.next(mockArtistsResult);
+      fixture.detectChanges();
+      expect(component.artists()).toEqual([]);
+      expect(fixture.nativeElement.querySelector('.loading-state')).toBeTruthy();
+    });
+
     it('should debounce rapid keystrokes and only query with the final search term', () => {
       vi.useFakeTimers();
 
@@ -197,6 +223,21 @@ describe('ArtistsList', () => {
         pageNumber: 1,
         pageSize: 20,
       });
+    });
+
+    it('should fetch when the query returns to the last requested value during debounce', () => {
+      vi.useFakeTimers();
+      fixture.detectChanges();
+
+      component.onSearchChange('Radio');
+      vi.advanceTimersByTime(300);
+      component.onSearchChange('Other');
+      component.onSearchChange('Radio');
+      vi.advanceTimersByTime(300);
+
+      expect(mockArtistsService.getArtists).toHaveBeenCalledTimes(3);
+      expect(component.loading()).toBe(false);
+      expect(component.artists()).toEqual(mockArtistsResult.items);
     });
 
     it('should cancel in-flight older requests and never overwrite with stale responses', () => {

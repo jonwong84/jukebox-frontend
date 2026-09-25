@@ -2,7 +2,7 @@ import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angula
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Subject, of } from 'rxjs';
-import { catchError, debounceTime, distinctUntilChanged, switchMap, tap } from 'rxjs/operators';
+import { catchError, debounceTime, switchMap, takeUntil, tap } from 'rxjs/operators';
 import { ArtistsService } from '../services';
 import { ArtistFilters, ArtistSummary } from '../models';
 
@@ -33,11 +33,9 @@ export class ArtistsList implements OnInit {
     this.searchInput$
       .pipe(
         debounceTime(300),
-        distinctUntilChanged(),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe((query) => {
-        this.currentPage.set(1);
         this.fetchTrigger$.next({ query, page: 1 });
       });
 
@@ -56,6 +54,7 @@ export class ArtistsList implements OnInit {
           };
 
           return this.artistsService.getArtists(filters).pipe(
+            takeUntil(this.searchInput$),
             catchError(() => {
               this.error.set('Failed to load artists. Please try again.');
               this.artists.set([]);
@@ -81,7 +80,13 @@ export class ArtistsList implements OnInit {
   }
 
   onSearchChange(value: string): void {
+    if (value === this.search()) return;
     this.search.set(value);
+    this.currentPage.set(1);
+    this.artists.set([]);
+    this.totalCount.set(0);
+    this.loading.set(true);
+    this.error.set(null);
     this.searchInput$.next(value);
   }
 
