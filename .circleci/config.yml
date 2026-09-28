@@ -1,0 +1,159 @@
+version: 2.1
+
+jobs:
+  build-and-test:
+    docker:
+      - image: cimg/node:22.14
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - run:
+          name: Build
+          command: npm run build
+      - run:
+          name: Test with coverage
+          command: |
+            mkdir -p /tmp/workspace
+            # NOTE: confirm this matches the actual test script in package.json.
+            # Vitest's coverage reporter must be configured for 'lcov' output
+            # (see vite.config.ts / vitest.config.ts: test.coverage.reporter).
+            npm run test -- --coverage
+      - run:
+          name: Copy coverage to workspace
+          command: |
+            mkdir -p /tmp/workspace
+            cp coverage/lcov.info /tmp/workspace/lcov.info
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - lcov.info
+
+  resolve-version:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install jw-cicd-tools
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@20873c3ac48a1c4c606453191299a92812a9218f
+      - run:
+          name: Resolve and persist image version
+          command: |
+            IMAGE_TAG=$(jw_cicd version resolve --changelog CHANGELOG.md --branch "$CIRCLE_BRANCH")
+            echo "Resolved tag: $IMAGE_TAG"
+            mkdir -p /tmp/workspace
+            echo "$IMAGE_TAG" > /tmp/workspace/version.txt
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - version.txt
+
+  sonar-scan:
+    docker:
+      # SonarSource's own scanner CLI image — the JS/TS analyzer doesn't need
+      # a language runtime the way the .NET scanner needed the SDK image.
+      - image: sonarsource/sonar-scanner-cli:latest
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Resolve PR Number
+          command: |
+            API_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/jonwong84/jukebox-frontend/pulls?state=open&head=jonwong84:$CIRCLE_BRANCH")
+            PR_NUMBER=$(echo "$API_RESPONSE" \
+              | grep -o '"number": [0-9]*' | head -1 | grep -o '[0-9]*' || true)
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+      - run:
+          name: Run SonarScan
+          command: |
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No open PR found for branch $CIRCLE_BRANCH — skipping Sonar scan"
+              circleci-agent step halt
+              exit 0
+            fi
+            # TODO: confirm this project key against what SonarCloud assigns
+            # when the jukebox-frontend project is created — placeholder below.
+            sonar-scanner \
+              -Dsonar.projectKey=jonwong84_jukebox-frontend \
+              -Dsonar.organization=jonwong84 \
+              -Dsonar.host.url=https://sonarcloud.io \
+              -Dsonar.token="$SONAR_TOKEN" \
+              -Dsonar.sources=src \
+              -Dsonar.exclusions="**/*.spec.ts,**/node_modules/**" \
+              -Dsonar.tests=src \
+              -Dsonar.test.inclusions="**/*.spec.ts" \
+              -Dsonar.javascript.lcov.reportPaths=/tmp/workspace/lcov.info \
+              -Dsonar.pullrequest.key="$PR_NUMBER" \
+              -Dsonar.pullrequest.branch="$CIRCLE_BRANCH" \
+              -Dsonar.pullrequest.base=main
+
+  publish-image:
+    machine:
+      image: ubuntu-2204:current
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Log in to GHCR
+          command: echo $GITHUB_TOKEN | docker login ghcr.io -u jonwong84 --password-stdin
+      - run:
+          name: Determine image tag
+          command: |
+            IMAGE_TAG=$(cat /tmp/workspace/version.txt)
+            echo "IMAGE_TAG=$IMAGE_TAG"
+            echo "export IMAGE_TAG=$IMAGE_TAG" >> $BASH_ENV
+      - run:
+          name: Build Docker image
+          command: |
+            DOCKER_BUILDKIT=1 docker build \
+              -f Dockerfile \
+              -t ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG \
+              -t ghcr.io/jonwong84/jukebox-frontend:latest \
+              .
+      - run:
+          name: Push Docker image
+          command: |
+            docker push ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG
+            docker push ghcr.io/jonwong84/jukebox-frontend:latest
+
+workflows:
+  build-test-scan-publish:
+    jobs:
+      - build-and-test:
+          context: global-v1
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
+      - sonar-scan:
+          context: global-v1
+          requires:
+            - build-and-test
+          filters:
+            branches:
+              only:
+                - /^feature\/.*/
+      - resolve-version:
+          requires:
+            - build-and-test
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
+      - publish-image:
+          context: global-v1
+          requires:
+            - resolve-version
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
