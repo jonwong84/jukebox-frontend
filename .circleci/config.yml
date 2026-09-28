@@ -3,7 +3,9 @@ version: 2.1
 jobs:
   build-and-test:
     docker:
-      - image: cimg/node:22.14
+      # Angular CLI here requires Node >= 22.22.3 (or 24.15+); floating LTS tag
+      # keeps up with that. Pin to an exact version once confirmed on Docker Hub.
+      - image: cimg/node:lts
     steps:
       - checkout
       - run:
@@ -15,16 +17,18 @@ jobs:
       - run:
           name: Test with coverage
           command: |
-            mkdir -p /tmp/workspace
-            # NOTE: confirm this matches the actual test script in package.json.
-            # Vitest's coverage reporter must be configured for 'lcov' output
-            # (see vite.config.ts / vitest.config.ts: test.coverage.reporter).
-            npm run test -- --coverage
+            # "test" is `ng test` (Angular's Vitest runner). Requires
+            # @vitest/coverage-v8 in devDependencies for --coverage to work.
+            npx ng test --no-watch --coverage --coverage-reporters=lcov
       - run:
           name: Copy coverage to workspace
           command: |
             mkdir -p /tmp/workspace
-            cp coverage/lcov.info /tmp/workspace/lcov.info
+            # Angular writes to coverage/<project-name>/, so locate the file
+            # instead of hardcoding the folder.
+            LCOV=$(find coverage -name lcov.info | head -1)
+            echo "Found coverage report: $LCOV"
+            cp "$LCOV" /tmp/workspace/lcov.info
       - persist_to_workspace:
           root: /tmp/workspace
           paths:
