@@ -69,10 +69,10 @@ jobs:
       - run:
           name: Resolve PR Number
           command: |
-            # NOTE: sonar-scanner-cli is Alpine-based and minimal — confirm
-            # curl and jq are actually present (apk add --no-cache curl jq
-            # if not) since the first green run used :latest, not this
-            # pinned tag, and Alpine images vary in what's preinstalled.
+            # jq confirmed NOT preinstalled on sonarsource/sonar-scanner-cli:12
+            # (flagged by CodeRabbit static analysis) — install it explicitly.
+            # curl IS present on this image; only jq needs adding.
+            apk add --no-cache jq >/dev/null
             # -f: fail loudly (non-zero exit) on HTTP errors instead of
             # treating a failed request the same as "no PR found".
             API_RESPONSE=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" \
