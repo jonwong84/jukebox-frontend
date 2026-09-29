@@ -58,7 +58,10 @@ jobs:
     docker:
       # SonarSource's own scanner CLI image — the JS/TS analyzer doesn't need
       # a language runtime the way the .NET scanner needed the SDK image.
-      - image: sonarsource/sonar-scanner-cli:latest
+      # Pinned (not :latest) for reproducible builds — bump deliberately.
+      # 12 tracks the latest patch within major v12; pin to the full
+      # x.y.z.build_scannerVersion tag instead if you want zero drift.
+      - image: sonarsource/sonar-scanner-cli:12
     steps:
       - checkout
       - attach_workspace:
@@ -66,10 +69,18 @@ jobs:
       - run:
           name: Resolve PR Number
           command: |
-            API_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            # NOTE: sonar-scanner-cli is Alpine-based and minimal — confirm
+            # curl and jq are actually present (apk add --no-cache curl jq
+            # if not) since the first green run used :latest, not this
+            # pinned tag, and Alpine images vary in what's preinstalled.
+            # -f: fail loudly (non-zero exit) on HTTP errors instead of
+            # treating a failed request the same as "no PR found".
+            API_RESPONSE=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" \
               "https://api.github.com/repos/jonwong84/jukebox-frontend/pulls?state=open&head=jonwong84:$CIRCLE_BRANCH")
-            PR_NUMBER=$(echo "$API_RESPONSE" \
-              | grep -o '"number": [0-9]*' | head -1 | grep -o '[0-9]*' || true)
+            # jq pulls the top-level .number from the first array element,
+            # avoiding grep's risk of matching a "number" field nested
+            # elsewhere in the JSON (e.g. inside "head" or "base").
+            PR_NUMBER=$(echo "$API_RESPONSE" | jq -r '.[0].number // empty')
             echo "PR_NUMBER=$PR_NUMBER"
             echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
       - run:
@@ -105,7 +116,7 @@ jobs:
           at: /tmp/workspace
       - run:
           name: Log in to GHCR
-          command: echo $GITHUB_TOKEN | docker login ghcr.io -u jonwong84 --password-stdin
+          command: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u jonwong84 --password-stdin
       - run:
           name: Determine image tag
           command: |
@@ -118,13 +129,20 @@ jobs:
             DOCKER_BUILDKIT=1 docker build \
               -f Dockerfile \
               -t ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG \
-              -t ghcr.io/jonwong84/jukebox-frontend:latest \
               .
+            # Only tag :latest on main — a feature-branch build must never
+            # overwrite the production "latest" pointer.
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker tag ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG \
+                ghcr.io/jonwong84/jukebox-frontend:latest
+            fi
       - run:
           name: Push Docker image
           command: |
             docker push ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG
-            docker push ghcr.io/jonwong84/jukebox-frontend:latest
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker push ghcr.io/jonwong84/jukebox-frontend:latest
+            fi
 
 workflows:
   build-test-scan-publish:
