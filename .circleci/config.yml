@@ -49,10 +49,44 @@ jobs:
             echo "Resolved tag: $IMAGE_TAG"
             mkdir -p /tmp/workspace
             echo "$IMAGE_TAG" > /tmp/workspace/version.txt
+      - run:
+          name: Resolve PR Number
+          command: |
+            # Done here instead of in the sonar-scan job because that job's
+            # image (sonarsource/sonar-scanner-cli) is Ubuntu-based, runs as
+            # a non-root user with no sudo, and has neither jq nor a
+            # reliable package manager available — two failed attempts
+            # (apk, then a bare apt-get) confirmed this the hard way.
+            # cimg/python already has curl, Python, and json/urllib built
+            # in, so no new dependency is needed here.
+            set -e
+            PR_NUMBER=$(python3 <<PYEOF
+            import json, os, sys, urllib.request, urllib.error
+
+            url = (
+                "https://api.github.com/repos/jonwong84/jukebox-frontend/pulls"
+                f"?state=open&head=jonwong84:{os.environ['CIRCLE_BRANCH']}"
+            )
+            req = urllib.request.Request(
+                url, headers={"Authorization": f"token {os.environ['GITHUB_TOKEN']}"}
+            )
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    data = json.load(resp)
+            except urllib.error.HTTPError as e:
+                print(f"GitHub API request failed: {e.code} {e.reason}", file=sys.stderr)
+                sys.exit(1)
+
+            print(data[0]["number"] if data else "", end="")
+            PYEOF
+            )
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "$PR_NUMBER" > /tmp/workspace/pr_number.txt
       - persist_to_workspace:
           root: /tmp/workspace
           paths:
             - version.txt
+            - pr_number.txt
 
   sonar-scan:
     docker:
@@ -67,20 +101,9 @@ jobs:
       - attach_workspace:
           at: /tmp/workspace
       - run:
-          name: Resolve PR Number
+          name: Load PR Number
           command: |
-            # jq confirmed NOT preinstalled on sonarsource/sonar-scanner-cli:12
-            # (flagged by CodeRabbit static analysis) — install it explicitly.
-            # curl IS present on this image; only jq needs adding.
-            apk add --no-cache jq >/dev/null
-            # -f: fail loudly (non-zero exit) on HTTP errors instead of
-            # treating a failed request the same as "no PR found".
-            API_RESPONSE=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" \
-              "https://api.github.com/repos/jonwong84/jukebox-frontend/pulls?state=open&head=jonwong84:$CIRCLE_BRANCH")
-            # jq pulls the top-level .number from the first array element,
-            # avoiding grep's risk of matching a "number" field nested
-            # elsewhere in the JSON (e.g. inside "head" or "base").
-            PR_NUMBER=$(echo "$API_RESPONSE" | jq -r '.[0].number // empty')
+            PR_NUMBER=$(cat /tmp/workspace/pr_number.txt)
             echo "PR_NUMBER=$PR_NUMBER"
             echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
       - run:
@@ -158,11 +181,13 @@ workflows:
           context: global-v1
           requires:
             - build-and-test
+            - resolve-version
           filters:
             branches:
               only:
                 - /^feature\/.*/
       - resolve-version:
+          context: global-v1
           requires:
             - build-and-test
           filters:
