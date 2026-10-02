@@ -1,0 +1,5 @@
+apiVersion: v2
+name: jukebox-frontend
+description: Helm chart for Jukebox Frontend
+type: application
+version: 0.1.0
