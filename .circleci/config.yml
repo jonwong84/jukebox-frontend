@@ -41,7 +41,7 @@ jobs:
       - checkout
       - run:
           name: Install jw-cicd-tools
-          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@20873c3ac48a1c4c606453191299a92812a9218f
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@db6e6bf3db43a4f796bda3e599a0e9a97d591d12
       - run:
           name: Resolve and persist image version
           command: |
@@ -52,34 +52,14 @@ jobs:
       - run:
           name: Resolve PR Number
           command: |
-            # Done here instead of in the sonar-scan job because that job's
-            # image (sonarsource/sonar-scanner-cli) is Ubuntu-based, runs as
-            # a non-root user with no sudo, and has neither jq nor a
-            # reliable package manager available — two failed attempts
-            # (apk, then a bare apt-get) confirmed this the hard way.
-            # cimg/python already has curl, Python, and json/urllib built
-            # in, so no new dependency is needed here.
+            # Now a shared jw_cicd_tools command (jw_cicd pr resolve)
+            # rather than a script local to this repo — the same fix now
+            # applies to any repo that bumps its jw-cicd-tools pin, instead
+            # of needing to be copy-pasted into jukebox-data-manager too.
+            # --token isn't passed explicitly; it defaults to $GITHUB_TOKEN
+            # from this job's context.
             set -e
-            PR_NUMBER=$(python3 <<PYEOF
-            import json, os, sys, urllib.request, urllib.error
-
-            url = (
-                "https://api.github.com/repos/jonwong84/jukebox-frontend/pulls"
-                f"?state=open&head=jonwong84:{os.environ['CIRCLE_BRANCH']}"
-            )
-            req = urllib.request.Request(
-                url, headers={"Authorization": f"token {os.environ['GITHUB_TOKEN']}"}
-            )
-            try:
-                with urllib.request.urlopen(req) as resp:
-                    data = json.load(resp)
-            except urllib.error.HTTPError as e:
-                print(f"GitHub API request failed: {e.code} {e.reason}", file=sys.stderr)
-                sys.exit(1)
-
-            print(data[0]["number"] if data else "", end="")
-            PYEOF
-            )
+            PR_NUMBER=$(jw_cicd pr resolve --repo jonwong84/jukebox-frontend --branch "$CIRCLE_BRANCH")
             echo "PR_NUMBER=$PR_NUMBER"
             echo "$PR_NUMBER" > /tmp/workspace/pr_number.txt
       - persist_to_workspace:
@@ -114,8 +94,6 @@ jobs:
               circleci-agent step halt
               exit 0
             fi
-            # TODO: confirm this project key against what SonarCloud assigns
-            # when the jukebox-frontend project is created — placeholder below.
             sonar-scanner \
               -Dsonar.projectKey=jonwong84_jukebox-frontend \
               -Dsonar.organization=jonwong84 \
