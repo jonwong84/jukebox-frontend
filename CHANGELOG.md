@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - Unreleased
+
+### Added
+- Helm chart for deploying the frontend to Kubernetes (`charts/jukebox-frontend`), with a NodePort service, readiness/liveness probes, and a configurable `API_UPSTREAM` value
+- nginx reverse proxy that forwards `/api/` requests to the backend REST host, so the Angular app can use relative URLs and the browser needs no CORS
+
+### Changed
+- nginx config is now an `envsubst` template (`/etc/nginx/templates/default.conf.template`), and the Dockerfile sets a default `API_UPSTREAM` for plain `docker run`
+- Quoted the fingerprinted-asset regex in `nginx.conf` for parser safety
+
 ## [0.2.0] - 2026-10-01
 
 ### Added

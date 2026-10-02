@@ -19,8 +19,15 @@ FROM nginx:1.27-alpine AS runtime
 # Remove nginx's default static content
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy our SPA-aware nginx config in place of the default one
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy our SPA-aware nginx config as a *template*. The nginx image's entrypoint
+# runs envsubst over /etc/nginx/templates/*.template at container start and
+# writes the result to /etc/nginx/conf.d/ (default.conf.template -> default.conf),
+# replacing the stock default.conf.
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# Default upstream for plain `docker run`. Kubernetes overrides this via the
+# chart's env block. Must NOT end with a trailing slash.
+ENV API_UPSTREAM=http://localhost:5035
 
 # Copy the compiled Angular output from the build stage.
 # Confirmed via local `dir`: dist/jukebox-frontend contains a browser/ subfolder
