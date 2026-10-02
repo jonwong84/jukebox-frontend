@@ -1,0 +1,184 @@
+version: 2.1
+
+jobs:
+  build-and-test:
+    docker:
+      # Angular CLI here requires Node >= 22.22.3 (or 24.15+); floating LTS tag
+      # keeps up with that. Pin to an exact version once confirmed on Docker Hub.
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - run:
+          name: Build
+          command: npm run build
+      - run:
+          name: Test with coverage
+          command: |
+            # "test" is `ng test` (Angular's Vitest runner). Requires
+            # @vitest/coverage-v8 in devDependencies for --coverage to work.
+            npx ng test --no-watch --coverage --coverage-reporters=lcov
+      - run:
+          name: Copy coverage to workspace
+          command: |
+            mkdir -p /tmp/workspace
+            # Angular writes to coverage/<project-name>/, so locate the file
+            # instead of hardcoding the folder.
+            LCOV=$(find coverage -name lcov.info | head -1)
+            echo "Found coverage report: $LCOV"
+            cp "$LCOV" /tmp/workspace/lcov.info
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - lcov.info
+
+  resolve-version:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install jw-cicd-tools
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@db6e6bf3db43a4f796bda3e599a0e9a97d591d12
+      - run:
+          name: Resolve and persist image version
+          command: |
+            IMAGE_TAG=$(jw_cicd version resolve --changelog CHANGELOG.md --branch "$CIRCLE_BRANCH")
+            echo "Resolved tag: $IMAGE_TAG"
+            mkdir -p /tmp/workspace
+            echo "$IMAGE_TAG" > /tmp/workspace/version.txt
+      - run:
+          name: Resolve PR Number
+          command: |
+            # Now a shared jw_cicd_tools command (jw_cicd pr resolve)
+            # rather than a script local to this repo — the same fix now
+            # applies to any repo that bumps its jw-cicd-tools pin, instead
+            # of needing to be copy-pasted into jukebox-data-manager too.
+            # --token isn't passed explicitly; it defaults to $GITHUB_TOKEN
+            # from this job's context.
+            set -e
+            PR_NUMBER=$(jw_cicd pr resolve --repo jonwong84/jukebox-frontend --branch "$CIRCLE_BRANCH")
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "$PR_NUMBER" > /tmp/workspace/pr_number.txt
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - version.txt
+            - pr_number.txt
+
+  sonar-scan:
+    docker:
+      # SonarSource's own scanner CLI image — the JS/TS analyzer doesn't need
+      # a language runtime the way the .NET scanner needed the SDK image.
+      # Pinned (not :latest) for reproducible builds — bump deliberately.
+      # 12 tracks the latest patch within major v12; pin to the full
+      # x.y.z.build_scannerVersion tag instead if you want zero drift.
+      - image: sonarsource/sonar-scanner-cli:12
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Load PR Number
+          command: |
+            PR_NUMBER=$(cat /tmp/workspace/pr_number.txt)
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "export PR_NUMBER=$PR_NUMBER" >> $BASH_ENV
+      - run:
+          name: Run SonarScan
+          command: |
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No open PR found for branch $CIRCLE_BRANCH — skipping Sonar scan"
+              circleci-agent step halt
+              exit 0
+            fi
+            sonar-scanner \
+              -Dsonar.projectKey=jonwong84_jukebox-frontend \
+              -Dsonar.organization=jonwong84 \
+              -Dsonar.host.url=https://sonarcloud.io \
+              -Dsonar.token="$SONAR_TOKEN" \
+              -Dsonar.sources=src \
+              -Dsonar.exclusions="**/*.spec.ts,**/node_modules/**" \
+              -Dsonar.tests=src \
+              -Dsonar.test.inclusions="**/*.spec.ts" \
+              -Dsonar.javascript.lcov.reportPaths=/tmp/workspace/lcov.info \
+              -Dsonar.pullrequest.key="$PR_NUMBER" \
+              -Dsonar.pullrequest.branch="$CIRCLE_BRANCH" \
+              -Dsonar.pullrequest.base=main
+
+  publish-image:
+    machine:
+      image: ubuntu-2204:current
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Log in to GHCR
+          command: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u jonwong84 --password-stdin
+      - run:
+          name: Determine image tag
+          command: |
+            IMAGE_TAG=$(cat /tmp/workspace/version.txt)
+            echo "IMAGE_TAG=$IMAGE_TAG"
+            echo "export IMAGE_TAG=$IMAGE_TAG" >> $BASH_ENV
+      - run:
+          name: Build Docker image
+          command: |
+            DOCKER_BUILDKIT=1 docker build \
+              -f Dockerfile \
+              -t ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG \
+              .
+            # Only tag :latest on main — a feature-branch build must never
+            # overwrite the production "latest" pointer.
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker tag ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG \
+                ghcr.io/jonwong84/jukebox-frontend:latest
+            fi
+      - run:
+          name: Push Docker image
+          command: |
+            docker push ghcr.io/jonwong84/jukebox-frontend:$IMAGE_TAG
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker push ghcr.io/jonwong84/jukebox-frontend:latest
+            fi
+
+workflows:
+  build-test-scan-publish:
+    jobs:
+      - build-and-test:
+          context: global-v1
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
+      - sonar-scan:
+          context: global-v1
+          requires:
+            - build-and-test
+            - resolve-version
+          filters:
+            branches:
+              only:
+                - /^feature\/.*/
+      - resolve-version:
+          context: global-v1
+          requires:
+            - build-and-test
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
+      - publish-image:
+          context: global-v1
+          requires:
+            - resolve-version
+          filters:
+            branches:
+              only:
+                - main
+                - /^feature\/.*/
