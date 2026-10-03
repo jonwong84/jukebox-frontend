@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README sections documenting Docker and Kubernetes deployment, including GHCR pull secret setup (local dev)
 
 ### Changed
-- nginx config is now an `envsubst` template (`/etc/nginx/templates/default.conf.template`), and the Dockerfile sets a default `API_UPSTREAM` for plain `docker run`
+- nginx config is now an `envsubst` template (`/etc/nginx/templates/default.conf.template`)
 - Quoted the fingerprinted-asset regex in `nginx.conf` for parser safety
+- Helm chart no longer defaults the image tag to `latest` (`image.tag` is required) or reserves a fixed NodePort
+- Dockerfile default `API_UPSTREAM` is now `http://host.docker.internal:5035`
 
 ## [0.2.0] - 2026-10-01
 

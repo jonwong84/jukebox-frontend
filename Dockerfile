@@ -25,9 +25,11 @@ RUN rm -rf /usr/share/nginx/html/*
 # replacing the stock default.conf.
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
-# Default upstream for plain `docker run`. Kubernetes overrides this via the
-# chart's env block. Must NOT end with a trailing slash.
-ENV API_UPSTREAM=http://localhost:5035
+# Default upstream for standalone `docker run` on Docker Desktop, where
+# host.docker.internal reaches the host machine. On Linux, add
+# --add-host=host.docker.internal:host-gateway. Kubernetes overrides this
+# via the chart's env block. Must NOT end with a trailing slash.
+ENV API_UPSTREAM=http://host.docker.internal:5035
 
 # Copy the compiled Angular output from the build stage.
 # Confirmed via local `dir`: dist/jukebox-frontend contains a browser/ subfolder

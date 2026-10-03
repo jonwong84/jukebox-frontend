@@ -44,10 +44,12 @@ This will compile your project and store the build artifacts in the `dist/` dire
 
 ```bash
 docker build -t jukebox-frontend .
-docker run --rm -p 8080:80 -e API_UPSTREAM=http://host.docker.internal:5035 jukebox-frontend
+docker run --rm -p 8080:80 jukebox-frontend
 ```
 
-Then open `http://localhost:8080`. `API_UPSTREAM` is the backend that nginx proxies `/api/` to (no trailing slash); it defaults to `http://localhost:5035`.
+Then open `http://localhost:8080`. `API_UPSTREAM` is the backend that nginx proxies `/api/` to (no trailing slash). It defaults to `http://host.docker.internal:5035`, which reaches a backend running on your host machine under Docker Desktop. Override it with `-e API_UPSTREAM=<url>` to point elsewhere.
+
+On Linux, `host.docker.internal` is not defined by default, so add `--add-host=host.docker.internal:host-gateway` to the `docker run` command.
 
 ## Running unit tests
 
@@ -100,7 +102,7 @@ helm install jukebox-frontend ./charts/jukebox-frontend `
 
 ### How API calls work
 
-The Angular app calls relative `/api/...` URLs. nginx proxies `/api/` to `API_UPSTREAM` and forwards the path unchanged, so the browser never talks to the backend directly and CORS is not needed. `API_UPSTREAM` is injected into the nginx config at container start (`envsubst` on `/etc/nginx/templates/default.conf.template`). A plain `docker run` defaults it to `http://localhost:5035`.
+The Angular app calls relative `/api/...` URLs. nginx proxies `/api/` to `API_UPSTREAM` and forwards the path unchanged, so the browser never talks to the backend directly and CORS is not needed. `API_UPSTREAM` is injected into the nginx config at container start (`envsubst` on `/etc/nginx/templates/default.conf.template`). A plain `docker run` defaults it to `http://host.docker.internal:5035`; in Kubernetes the chart's `env.API_UPSTREAM` value overrides it.
 
 ### Access
 
