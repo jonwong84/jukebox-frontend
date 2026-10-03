@@ -1,0 +1,15 @@
+replicaCount: 1
+imagePullSecrets: []
+
+image:
+  repository: ghcr.io/jonwong84/jukebox-frontend
+  tag: ""
+  pullPolicy: IfNotPresent
+
+service:
+  type: NodePort
+  port: 80
+  # nodePort: 30080   # optional: set only if you need a fixed port; omit to let Kubernetes allocate one
+
+env:
+  API_UPSTREAM: http://jukebox-data-manager-rest:5035
