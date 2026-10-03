@@ -1,4 +1,5 @@
 replicaCount: 1
+imagePullSecrets: []
 
 image:
   repository: ghcr.io/jonwong84/jukebox-frontend
