@@ -12,9 +12,9 @@ ng serve
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
-> **Note:** The app calls the backend through relative `/api/...` URLs. In
-> production, nginx proxies these to the REST host. `ng serve` has no such
-> proxy, so API calls will fail unless a dev proxy is configured.
+> **Note:** The app calls the backend through relative `/api/...` URLs. `ng serve`
+> proxies `/api` to `http://localhost:5035` (see `proxy.conf.json`), so run the
+> REST host locally first. In production, nginx does the same job.
 
 ## Code scaffolding
 
