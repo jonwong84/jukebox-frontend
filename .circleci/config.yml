@@ -132,62 +132,57 @@ jobs:
             mkdir -p /tmp/workspace
             : > /tmp/workspace/version.txt
 
-            attempt=1
-            while true; do
-              # On main this prints the version that will be released, or a
-              # blank line when [Unreleased] has no entries.
-              VERSION=$(jw_cicd version resolve --changelog CHANGELOG.md --branch "$CIRCLE_BRANCH")
-              if [ -z "$VERSION" ]; then
-                echo "Nothing to release."
-                exit 0
-              fi
-              echo "Releasing version: $VERSION"
+            # Only the newest commit on main may release. If main has moved
+            # past this pipeline's commit, a newer pipeline (whose tree
+            # includes these changes) will release them. Releasing from this
+            # stale tree would publish an image missing the newer code.
+            REMOTE_SHA=$(git ls-remote origin refs/heads/main | cut -f1)
+            if [ "$(git rev-parse HEAD)" != "$REMOTE_SHA" ]; then
+              echo "main has moved past this commit; a newer pipeline will release. Nothing to do here."
+              exit 0
+            fi
 
-              # Check origin directly rather than a local tag ref. With
-              # entries under [Unreleased], an existing tag means something
-              # is wrong.
-              if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
-                echo "Tag v$VERSION already exists on origin, but [Unreleased] still has entries." >&2
-                exit 1
-              fi
+            # On main this prints the version that will be released, or a
+            # blank line when [Unreleased] has no entries.
+            VERSION=$(jw_cicd version resolve --changelog CHANGELOG.md --branch "$CIRCLE_BRANCH")
+            if [ -z "$VERSION" ]; then
+              echo "Nothing to release."
+              exit 0
+            fi
+            echo "Releasing version: $VERSION"
 
-              jw_cicd release stamp --changelog CHANGELOG.md >/dev/null
-              git add CHANGELOG.md
-              git commit -m "Release v$VERSION [skip ci]"
-              git tag -a "v$VERSION" -m "Release v$VERSION"
+            # Check origin directly rather than a local tag ref. With
+            # entries under [Unreleased], an existing tag means something
+            # is wrong.
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+              echo "Tag v$VERSION already exists on origin, but [Unreleased] still has entries." >&2
+              exit 1
+            fi
 
-              # Atomic: the stamp commit and the tag land together or not at
-              # all. This is the first step that writes to the remote, so a
-              # ruleset rejection leaves nothing tagged or published.
-              if git push --atomic "$REPO_URL" HEAD:refs/heads/main "refs/tags/v$VERSION" 2>push_error.log; then
-                echo "Released v$VERSION"
-                echo "$VERSION" > /tmp/workspace/version.txt
-                exit 0
-              fi
+            jw_cicd release stamp --changelog CHANGELOG.md >/dev/null
+            git add CHANGELOG.md
+            git commit -m "Release v$VERSION [skip ci]"
+            git tag -a "v$VERSION" -m "Release v$VERSION"
 
-              # Rule/protection violations are not retryable.
-              if grep -qE 'GH013|GH006|protected branch|rule violations' push_error.log; then
-                echo "Push to main was rejected by a branch rule:" >&2
-                cat push_error.log >&2
-                exit 1
-              fi
+            # Atomic: the stamp commit and the tag land together or not at
+            # all. This is the first step that writes to the remote, so a
+            # ruleset rejection leaves nothing tagged or published.
+            if git push --atomic "$REPO_URL" HEAD:refs/heads/main "refs/tags/v$VERSION" 2>push_error.log; then
+              echo "Released v$VERSION"
+              echo "$VERSION" > /tmp/workspace/version.txt
+              exit 0
+            fi
 
-              if [ "$attempt" -ge 2 ]; then
-                echo "Push failed after retry:" >&2
-                cat push_error.log >&2
-                exit 1
-              fi
-
-              # main probably moved (a concurrent merge). Reset to origin and
-              # recompute once. If a concurrent job already released, then
-              # [Unreleased] is now empty and the loop exits 0 above.
-              echo "Push rejected; resetting to origin/main and retrying once."
-              cat push_error.log
-              git tag -d "v$VERSION"
-              git fetch origin main
-              git reset --hard origin/main
-              attempt=$((attempt + 1))
-            done
+            # No retry: after a failed push this tree may no longer be the tip
+            # of main, and the image must be built from the commit the release
+            # was computed from. Fail loudly instead.
+            if grep -qE 'GH013|GH006|protected branch|rule violations' push_error.log; then
+              echo "Push to main was rejected by a branch rule:" >&2
+            else
+              echo "Push to main failed (main may have moved since the tip check):" >&2
+            fi
+            cat push_error.log >&2
+            exit 1
       - persist_to_workspace:
           root: /tmp/workspace
           paths:
