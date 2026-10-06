@@ -34,6 +34,8 @@ jobs:
           paths:
             - lcov.info
 
+  # Feature branches only. On main, the release job below resolves (and
+  # stamps) the version itself.
   resolve-version:
     docker:
       - image: cimg/python:3.12
@@ -41,7 +43,7 @@ jobs:
       - checkout
       - run:
           name: Install jw-cicd-tools
-          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@db6e6bf3db43a4f796bda3e599a0e9a97d591d12
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@v0.4.0
       - run:
           name: Resolve and persist image version
           command: |
@@ -108,6 +110,89 @@ jobs:
               -Dsonar.pullrequest.branch="$CIRCLE_BRANCH" \
               -Dsonar.pullrequest.base=main
 
+  # main only. Stamps the changelog, commits it with [skip ci], tags it, and
+  # pushes both atomically. Writes the released version (or an empty file when
+  # there is nothing to release) to the workspace for publish-image-main.
+  release:
+    docker:
+      - image: cimg/python:3.12
+    steps:
+      - checkout
+      - run:
+          name: Install jw-cicd-tools
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@v0.4.0
+      - run:
+          name: Stamp changelog, tag, and push release
+          command: |
+            git config user.name "CircleCI"
+            git config user.email "ci@users.noreply.github.com"
+            REPO_URL="https://${GITHUB_TOKEN}@github.com/jonwong84/jukebox-frontend.git"
+
+            # Empty by default: publish-image skips when version.txt is blank.
+            mkdir -p /tmp/workspace
+            : > /tmp/workspace/version.txt
+
+            attempt=1
+            while true; do
+              # On main this prints the version that will be released, or a
+              # blank line when [Unreleased] has no entries.
+              VERSION=$(jw_cicd version resolve --changelog CHANGELOG.md --branch "$CIRCLE_BRANCH")
+              if [ -z "$VERSION" ]; then
+                echo "Nothing to release."
+                exit 0
+              fi
+              echo "Releasing version: $VERSION"
+
+              # Check origin directly rather than a local tag ref. With
+              # entries under [Unreleased], an existing tag means something
+              # is wrong.
+              if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+                echo "Tag v$VERSION already exists on origin, but [Unreleased] still has entries." >&2
+                exit 1
+              fi
+
+              jw_cicd release stamp --changelog CHANGELOG.md >/dev/null
+              git add CHANGELOG.md
+              git commit -m "Release v$VERSION [skip ci]"
+              git tag -a "v$VERSION" -m "Release v$VERSION"
+
+              # Atomic: the stamp commit and the tag land together or not at
+              # all. This is the first step that writes to the remote, so a
+              # ruleset rejection leaves nothing tagged or published.
+              if git push --atomic "$REPO_URL" HEAD:refs/heads/main "refs/tags/v$VERSION" 2>push_error.log; then
+                echo "Released v$VERSION"
+                echo "$VERSION" > /tmp/workspace/version.txt
+                exit 0
+              fi
+
+              # Rule/protection violations are not retryable.
+              if grep -qE 'GH013|GH006|protected branch|rule violations' push_error.log; then
+                echo "Push to main was rejected by a branch rule:" >&2
+                cat push_error.log >&2
+                exit 1
+              fi
+
+              if [ "$attempt" -ge 2 ]; then
+                echo "Push failed after retry:" >&2
+                cat push_error.log >&2
+                exit 1
+              fi
+
+              # main probably moved (a concurrent merge). Reset to origin and
+              # recompute once. If a concurrent job already released, then
+              # [Unreleased] is now empty and the loop exits 0 above.
+              echo "Push rejected; resetting to origin/main and retrying once."
+              cat push_error.log
+              git tag -d "v$VERSION"
+              git fetch origin main
+              git reset --hard origin/main
+              attempt=$((attempt + 1))
+            done
+      - persist_to_workspace:
+          root: /tmp/workspace
+          paths:
+            - version.txt
+
   publish-image:
     machine:
       image: ubuntu-2204:current
@@ -116,14 +201,21 @@ jobs:
       - attach_workspace:
           at: /tmp/workspace
       - run:
-          name: Log in to GHCR
-          command: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u jonwong84 --password-stdin
-      - run:
           name: Determine image tag
           command: |
             IMAGE_TAG=$(cat /tmp/workspace/version.txt)
+            # A blank version means the release job found nothing to
+            # release (for example a docs-only merge): don't publish.
+            if [ -z "$IMAGE_TAG" ]; then
+              echo "Nothing to release — skipping image publish"
+              circleci-agent step halt
+              exit 0
+            fi
             echo "IMAGE_TAG=$IMAGE_TAG"
             echo "export IMAGE_TAG=$IMAGE_TAG" >> $BASH_ENV
+      - run:
+          name: Log in to GHCR
+          command: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u jonwong84 --password-stdin
       - run:
           name: Build Docker image
           command: |
@@ -155,6 +247,15 @@ workflows:
               only:
                 - main
                 - /^feature\/.*/
+      # Feature branches: resolve a beta version, scan, publish a beta image.
+      - resolve-version:
+          context: global-v1
+          requires:
+            - build-and-test
+          filters:
+            branches:
+              only:
+                - /^feature\/.*/
       - sonar-scan:
           context: global-v1
           requires:
@@ -164,7 +265,17 @@ workflows:
             branches:
               only:
                 - /^feature\/.*/
-      - resolve-version:
+      - publish-image:
+          name: publish-image-branch
+          context: global-v1
+          requires:
+            - resolve-version
+          filters:
+            branches:
+              only:
+                - /^feature\/.*/
+      # main: release first (stamp, tag, push), then publish only if it succeeded.
+      - release:
           context: global-v1
           requires:
             - build-and-test
@@ -172,13 +283,12 @@ workflows:
             branches:
               only:
                 - main
-                - /^feature\/.*/
       - publish-image:
+          name: publish-image-main
           context: global-v1
           requires:
-            - resolve-version
+            - release
           filters:
             branches:
               only:
                 - main
-                - /^feature\/.*/
