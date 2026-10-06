@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-06
+
 ### Changed
 - CI now releases automatically on merge to `main`: a `release` job computes the version from the entries under `## [Unreleased]`, stamps the changelog heading with the version and UTC date, commits it with `[skip ci]`, tags the commit, and pushes both atomically. The image is published only after the release succeeds, and merges with no entries release nothing.
 - Bumped `jw-cicd-tools` from a commit-hash pin to the `v0.4.0` tag.
