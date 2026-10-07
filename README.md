@@ -59,6 +59,14 @@ To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use th
 ng test
 ```
 
+## Releasing
+
+Releases are automated. Add your changes as bullets under a subsection (`### Added`,
+`### Fixed`, and so on) of `## [Unreleased]` in `CHANGELOG.md` as part of your PR.
+Merging to `main` cuts the release and publishes the image. A merge with no entries releases nothing.
+See [Releases and versioning](https://github.com/jonwong84/jw-cicd-tools#releases-and-versioning)
+for the entry format and rules.
+
 ## Deploying to Kubernetes (local dev)
 
 These steps target a local cluster (kind) and were verified end to end. Production on Azure will differ: images will come from Azure Container Registry with AKS managed identity, so no pull secret or personal token will be needed.
