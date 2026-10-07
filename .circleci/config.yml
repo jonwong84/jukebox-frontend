@@ -43,7 +43,9 @@ jobs:
       - checkout
       - run:
           name: Install jw-cicd-tools
-          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@v0.4.0
+          # v0.4.0 — pinned to the commit the tag points at (immutable),
+          # not the mutable tag itself.
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@d2b8915ab74ca83b5e9410181133b99ce56294b4
       - run:
           name: Resolve and persist image version
           command: |
@@ -54,10 +56,8 @@ jobs:
       - run:
           name: Resolve PR Number
           command: |
-            # Now a shared jw_cicd_tools command (jw_cicd pr resolve)
-            # rather than a script local to this repo — the same fix now
-            # applies to any repo that bumps its jw-cicd-tools pin, instead
-            # of needing to be copy-pasted into jukebox-data-manager too.
+            # Looks up the open PR number for this branch with the shared
+            # jw_cicd command. sonar-scan skips when the result is empty.
             # --token isn't passed explicitly; it defaults to $GITHUB_TOKEN
             # from this job's context.
             set -e
@@ -120,7 +120,9 @@ jobs:
       - checkout
       - run:
           name: Install jw-cicd-tools
-          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@v0.4.0
+          # v0.4.0 — pinned to the commit the tag points at (immutable),
+          # not the mutable tag itself.
+          command: pip install git+https://github.com/jonwong84/jw-cicd-tools.git@d2b8915ab74ca83b5e9410181133b99ce56294b4
       - run:
           name: Stamp changelog, tag, and push release
           command: |
@@ -181,7 +183,8 @@ jobs:
             else
               echo "Push to main failed (main may have moved since the tip check):" >&2
             fi
-            cat push_error.log >&2
+            # Redact the token in case git echoes the remote URL.
+            sed "s|${GITHUB_TOKEN}|***|g" push_error.log >&2
             exit 1
       - persist_to_workspace:
           root: /tmp/workspace
